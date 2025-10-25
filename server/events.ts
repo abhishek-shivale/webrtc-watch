@@ -1,10 +1,9 @@
 import { consumers, producers, router, transports } from "./constant";
 import { createTransport } from "./mediasoup";
 import mediasoup from "mediasoup";
-import { HLSManager } from './hls-manager';
-
-// Add to your existing events.ts
-export const hlsManager = new HLSManager();
+import { hlsManager } from "./hls-manager";
+import { PlainTransport, Router } from "mediasoup/types";
+import { Producer } from "mediasoup-client/types";
 
 
 export const rtpCapabilities = (callback: any) => {
@@ -101,14 +100,17 @@ export const connectConsumerTransport = async (
     if (!transport) {
       throw new Error(`Consumer transport not found for socket: ${id}`);
     }
-    
+
     await transport.connect({ dtlsParameters });
-    
+
     console.log(`Consumer transport connected successfully for socket: ${id}`);
-    
+
     callback({ success: true });
   } catch (error) {
-    console.error(`Error connecting consumer transport for socket ${id}:`, error);
+    console.error(
+      `Error connecting consumer transport for socket ${id}:`,
+      error
+    );
     callback({ error: `Error connecting consumer transport: ${error}` });
   }
 };
@@ -151,16 +153,18 @@ export const produce = async (
     setTimeout(async () => {
       try {
         const hlsPlaylist = await hlsManager.startHLSStream(producer, router);
-        console.log(`HLS stream started for producer ${producer.id}: ${hlsPlaylist}`);
-        
+        console.log(
+          `HLS stream started for producer ${producer.id}: ${hlsPlaylist}`
+        );
+
         // Emit HLS stream info to all clients
         socket.broadcast.emit("newHLSStream", {
           producerId: producer.id,
           socketId: socket.id,
-          playlist: hlsPlaylist
+          playlist: hlsPlaylist,
         });
       } catch (error) {
-        console.error('Failed to start HLS stream:', error);
+        console.error("Failed to start HLS stream:", error);
       }
     }, 1000);
 
@@ -178,16 +182,16 @@ export const produce = async (
   }
 };
 
-
-
 export const consume = async (
   producerId: string,
   callback: any,
   socket: any
 ) => {
   try {
-    console.log(`🔄 Attempting to consume producer ${producerId} for socket ${socket.id}`);
-    
+    console.log(
+      `🔄 Attempting to consume producer ${producerId} for socket ${socket.id}`
+    );
+
     if (consumers.has(socket.id)) {
       console.log("Consumer already exists for this socket, cleaning up");
       const oldConsumer = consumers.get(socket.id);
@@ -196,7 +200,7 @@ export const consume = async (
       }
       consumers.delete(socket.id);
     }
-    
+
     const transport = transports.get(`${socket.id}-consumer`);
     const producerData = Array.from(producers.values()).find(
       (producer) => producer.producerId === producerId
@@ -205,7 +209,7 @@ export const consume = async (
     if (!transport) {
       throw new Error(`Consumer transport not found for socket ${socket.id}`);
     }
-    
+
     if (!producerData) {
       throw new Error(`Producer ${producerId} not found`);
     }
@@ -213,36 +217,44 @@ export const consume = async (
     if (!socket.rtpCapabilities) {
       throw new Error(`RTP capabilities not set on socket ${socket.id}`);
     }
-    
+
     const { producer } = producerData;
     const consumerRtpCapabilities = socket.rtpCapabilities;
 
     // Check if this router can consume this producer
     const canConsume = router.canConsume({
       producerId: producer.id,
-      rtpCapabilities: consumerRtpCapabilities as mediasoup.types.RtpCapabilities,
+      rtpCapabilities:
+        consumerRtpCapabilities as mediasoup.types.RtpCapabilities,
     });
-    
+
     if (!canConsume) {
-      throw new Error(`Cannot consume producer ${producerId} - incompatible RTP capabilities`);
+      throw new Error(
+        `Cannot consume producer ${producerId} - incompatible RTP capabilities`
+      );
     }
 
-    console.log(`✅ Router can consume producer ${producerId}, creating consumer...`);
+    console.log(
+      `✅ Router can consume producer ${producerId}, creating consumer...`
+    );
 
     // Check transport connection state
     // console.log(`Transport connection state: ${transport.connectionState.}`);
 
     const consumer = await transport.consume({
       producerId: producer.id,
-      rtpCapabilities: consumerRtpCapabilities as mediasoup.types.RtpCapabilities,
+      rtpCapabilities:
+        consumerRtpCapabilities as mediasoup.types.RtpCapabilities,
     });
-    
+
     // Store consumer with the actual consumer id
     consumers.set(socket.id, { consumer, consumerId: consumer.id });
-    
-    console.log(`✅ Consumer created: ${consumer.id} for socket ${socket.id} (producer: ${producerId})`);
+
+    console.log(
+      `✅ Consumer created: ${consumer.id} for socket ${socket.id} (producer: ${producerId})`
+    );
     console.log(`Consumer paused state: ${consumer.paused}`);
-    
+
     callback({
       id: consumer.id,
       producerId,
@@ -250,7 +262,10 @@ export const consume = async (
       rtpParameters: consumer.rtpParameters,
     });
   } catch (error) {
-    console.error(`💥 Error consuming producer ${producerId} for socket ${socket.id}:`, error);
+    console.error(
+      `💥 Error consuming producer ${producerId} for socket ${socket.id}:`,
+      error
+    );
     callback({ error: `Error consuming: ${error}` });
   }
 };
@@ -261,8 +276,10 @@ export const resumeConsumer = async (
   id: string
 ) => {
   try {
-    console.log(`⏯️ Attempting to resume consumer ${consumerId} for socket ${id}`);
-    
+    console.log(
+      `⏯️ Attempting to resume consumer ${consumerId} for socket ${id}`
+    );
+
     const consumerData = consumers.get(id);
 
     if (!consumerData) {
@@ -270,21 +287,28 @@ export const resumeConsumer = async (
     }
 
     if (consumerData.consumerId !== consumerId) {
-      throw new Error(`Consumer ID mismatch. Expected: ${consumerData.consumerId}, Got: ${consumerId}`);
+      throw new Error(
+        `Consumer ID mismatch. Expected: ${consumerData.consumerId}, Got: ${consumerId}`
+      );
     }
 
     const { consumer } = consumerData;
-    
+
     if (consumer.paused) {
       await consumer.resume();
       console.log(`✅ Consumer ${consumerId} resumed for socket ${id}`);
     } else {
-      console.log(`ℹ️ Consumer ${consumerId} was already resumed for socket ${id}`);
+      console.log(
+        `ℹ️ Consumer ${consumerId} was already resumed for socket ${id}`
+      );
     }
-    
+
     callback({ success: true });
   } catch (error) {
-    console.error(`💥 Error resuming consumer ${consumerId} for socket ${id}:`, error);
+    console.error(
+      `💥 Error resuming consumer ${consumerId} for socket ${id}:`,
+      error
+    );
     callback({ error: `Error resuming consumer: ${error}` });
   }
 };
@@ -292,7 +316,7 @@ export const resumeConsumer = async (
 export const getProducers = async (callback: any, id: string) => {
   try {
     console.log(`📋 Getting producers list for socket ${id}`);
-    
+
     const currentProducer = producers.get(id);
     const producerList = Array.from(producers.entries())
       .filter(([socketId, data]) => {
@@ -305,10 +329,12 @@ export const getProducers = async (callback: any, id: string) => {
         producerId: data.producerId,
         socketId: socketId,
       }));
-    
-    console.log(`📊 Returning ${producerList.length} producers for socket ${id}:`, 
-      producerList.map(p => `${p.producerId} (from ${p.socketId})`));
-    
+
+    console.log(
+      `📊 Returning ${producerList.length} producers for socket ${id}:`,
+      producerList.map((p) => `${p.producerId} (from ${p.socketId})`)
+    );
+
     callback({ producerList });
   } catch (error) {
     console.error(`💥 Error getting producers for socket ${id}:`, error);
@@ -316,19 +342,39 @@ export const getProducers = async (callback: any, id: string) => {
   }
 };
 
-
-
 export const getHLSStreams = (callback: any) => {
   try {
-    const streams = hlsManager.getAllHLSStreams();
-    const streamsWithStatus = streams.map(stream => ({
-      ...stream,
-      status: hlsManager.getStreamStatus(stream.producerId)
-    }));
-    callback({ streams: streamsWithStatus });
+    console.log("Getting HLS streams...");
+
+    const activeStreams = hlsManager.getAllHLSStreams();
+
+    const producersWithHLS = Array.from(producers.entries())
+      .map(([socketId, producerData]) => {
+        const hlsStream = activeStreams.find(
+          (stream) => stream.producerId === producerData.producer.id
+        );
+        return {
+          producerId: producerData.producer.id,
+          socketId: socketId,
+          playlist: hlsStream?.playlist || null,
+          streamId: hlsStream?.streamId || null,
+          hasHLS: !!hlsStream,
+        };
+      })
+      .filter((stream) => stream.hasHLS); 
+
+    console.log(
+      `Found ${producersWithHLS.length} active HLS streams:`,
+      producersWithHLS
+    );
+
+    callback({
+      streams: producersWithHLS,
+      count: producersWithHLS.length,
+    });
   } catch (error) {
-    console.error('Error getting HLS streams:', error);
-    callback({ error: 'Error getting HLS streams' });
+    console.error("Error getting HLS streams:", error);
+    callback({ error: "Error getting HLS streams", streams: [] });
   }
 };
 
@@ -338,10 +384,40 @@ export const getHLSPlaylist = (producerId: string, callback: any) => {
     if (status.isActive && status.playlist) {
       callback({ playlist: status.playlist });
     } else {
-      callback({ error: status.error || 'HLS stream not ready' });
+      callback({ error: status.error || "HLS stream not ready" });
     }
   } catch (error) {
-    console.error('Error getting HLS playlist:', error);
-    callback({ error: 'Error getting HLS playlist' });
+    console.error("Error getting HLS playlist:", error);
+    callback({ error: "Error getting HLS playlist" });
+  }
+};
+
+export const createPlainRtpTransport = async () => {
+  try {
+    const rtpTransport = await router.createPlainTransport({
+      listenIp: "127.0.0.1",
+      rtcpMux: false,
+      comedia: false,
+    });
+    console.log("Created plain rtp transport", rtpTransport);
+    return rtpTransport;
+  } catch (error) {
+    console.log("Error while creating palin rtp transport", error);
+  }
+};
+
+export const consumeProducer = async (
+  rtpTransport: PlainTransport,
+  producer: Producer
+) => {
+  try {
+    const consumer = await rtpTransport.consume({
+      producerId: producer.id,
+      rtpCapabilities: router.rtpCapabilities,
+      paused: false,
+    });
+    return consumer;
+  } catch (error) {
+    console.log("Error while consuming producer");
   }
 };

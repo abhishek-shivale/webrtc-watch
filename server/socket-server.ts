@@ -1,20 +1,21 @@
 import { Server } from "socket.io";
-import mediasoup from 'mediasoup';
+import mediasoup from "mediasoup";
 import {
   connectConsumerTransport,
   connectProducerTransport,
   consume,
   createConsumerTransport,
+  createPlainRtpTransport,
   createProducerTransport,
   getHLSPlaylist,
   getHLSStreams,
   getProducers,
-  hlsManager,
   produce,
   resumeConsumer,
   rtpCapabilities,
 } from "./events";
 import { consumers, producers, transports } from "./constant";
+import { hlsManager } from "./hls-manager";
 
 declare module "socket.io" {
   interface Socket {
@@ -63,30 +64,32 @@ export function initSocketIO(httpServer: any) {
     );
 
     socket.on("produce", async ({ kind, rtpParameters }, callback) => {
-        produce(kind, rtpParameters, callback, socket);
+      produce(kind, rtpParameters, callback, socket);
     });
 
     socket.on("consumer", async ({ producerId }, callback) => {
-        consume(producerId, callback, socket);
-    })
+      consume(producerId, callback, socket);
+    });
 
     socket.on("resumeConsumer", async ({ consumerId }, callback) => {
-        resumeConsumer(consumerId, callback, socket.id);
+      resumeConsumer(consumerId, callback, socket.id);
     });
 
     socket.on("getProducers", (callback) => {
-        getProducers(callback, socket.id);
+      getProducers(callback, socket.id);
     });
 
     socket.on("setRtpCapabilities", (rtpCapabilities) => {
       socket.rtpCapabilities = rtpCapabilities;
     });
 
-   socket.on("getHLSStreams", (callback) => {
+    socket.on("getHLSStreams", (callback) => {
+      console.log("Client requesting HLS streams");
       getHLSStreams(callback);
     });
 
     socket.on("getHLSPlaylist", ({ producerId }, callback) => {
+      console.log("Client requesting HLS playlist for producer:", producerId);
       getHLSPlaylist(producerId, callback);
     });
 
@@ -96,12 +99,12 @@ export function initSocketIO(httpServer: any) {
         // Stop HLS stream
         hlsManager.stopHLSStream(producerData.producer.id);
       }
-      
+
       producers.delete(socket.id);
       transports.delete(`${socket.id}-producer`);
       transports.delete(`${socket.id}-consumer`);
       consumers.delete(socket.id);
-      io.emit("clientDisconnected", socket.id);  
+      io.emit("clientDisconnected", socket.id);
       console.log("A client disconnected");
     });
   });
